@@ -343,6 +343,17 @@ table.data tr.sel-row{background:#F0F9FF}
 .modal-head p{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
 .modal-body{padding:20px 22px;max-height:66vh;overflow-y:auto}
 .modal-foot{padding:15px 22px;border-top:1px solid var(--line-2);display:flex;justify-content:flex-end;gap:10px;background:var(--surface-2);border-radius:0 0 16px 16px}
+.modal.pw{max-width:520px}
+.modal-head.grad{background:linear-gradient(120deg,var(--navy),var(--brand-2));border-bottom:none;padding:20px 22px;border-radius:16px 16px 0 0}
+.modal-head.grad h3{color:#fff}
+.modal-head.grad p{color:rgba(255,255,255,.82)}
+.modal-head.grad .ic{background:rgba(255,255,255,.18);color:#fff}
+.modal-head.grad .ic:hover{background:rgba(255,255,255,.32);color:#fff}
+.fg .pw{position:relative}
+.fg .pw input{padding-right:44px}
+.fg .pw .eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:32px;height:32px;border:none;background:transparent;color:#64748b;cursor:pointer;display:grid;place-items:center;border-radius:8px}
+.fg .pw .eye:hover{color:var(--brand-2);background:rgba(8,145,178,.08)}
+.fg .pw .eye svg{width:20px;height:20px}
 .form-section{margin-bottom:18px}
 .form-section .lg{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;color:var(--navy);
   text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px dashed var(--line)}
@@ -706,7 +717,7 @@ function toast(msg,type='ok'){
   $('#toast-wrap').appendChild(t);
   setTimeout(()=>{t.style.transition='.3s';t.style.opacity='0';t.style.transform='translateY(10px)';setTimeout(()=>t.remove(),300)},2900);
 }
-function openModal(html,wide){ $('#modal-root').innerHTML=`<div class="modal-back"><div class="modal ${wide?'wide':''}">${html}</div></div>`; }
+function openModal(html,cls){ $('#modal-root').innerHTML=`<div class="modal-back"><div class="modal ${cls===true?'wide':(cls||'')}">${html}</div></div>`; }
 function closeModal(){ $('#modal-root').innerHTML=''; }
 
 /* ---------- Trạng thái & giai đoạn của seal ---------- */
@@ -803,7 +814,19 @@ const LocalStore={
     this._save(d); return {}; },
   async delCont(ids){ const d=this._db(); d.cont=d.cont.filter(x=>!ids.includes(x.id)); this._save(d); return {}; },
   async saveMaster(key,list){ const d=this._db(); d.master[key]=list; this._save(d); return {}; },
-  async saveAccounts(list){ const d=this._db(); d.accounts=list; this._save(d); return {}; },
+  async saveAccounts(list){ const d=this._db();
+    const byUser={}; (d.accounts||[]).forEach(a=>{ byUser[String(a.user).toLowerCase()]=a; });
+    d.accounts=(list||[]).map(a=>{ const ex=byUser[String(a.user).toLowerCase()]||{};
+      const merged=Object.assign({}, ex, a);
+      if(a.pass==null || a.pass===''){ merged.pass = ex.pass; }        // client không gửi mật khẩu -> giữ nguyên mật khẩu cũ
+      else if(!isHashed(a.pass)){ merged.pass = hashPw(a.pass); }       // mật khẩu mới dạng chữ -> băm
+      return merged; });
+    this._save(d); return {}; },
+  async changePassword(user,currentPw,newPw){ const d=this._db();
+    const a=d.accounts.find(x=>String(x.user).toLowerCase()===String(user).toLowerCase());
+    if(!a) throw new Error('Không tìm thấy tài khoản.');
+    if(!pwMatch(a.pass,currentPw)) throw new Error('Mật khẩu hiện tại không đúng.');
+    a.pass=hashPw(newPw); a.must_change=false; this._save(d); return {}; },
   async saveCfg(cfg){ const d=this._db(); d.cfg=Object.assign(d.cfg||{},cfg); this._save(d); return {}; },
   _autoMaster(d,rec){ ['so_seal','hq_quan_ly','nguoi_giao','nguoi_nhan','noi_su_dung'].forEach(k=>{
     const v=(rec[k]||'').trim(); if(v && !d.master[k].includes(v)) d.master[k].push(v); }); },
@@ -828,6 +851,7 @@ const SheetsStore={
   async delCont(ids){ return this._call('delCont',{ids}); },
   async saveMaster(key,list){ return this._call('saveMaster',{key,list}); },
   async saveAccounts(list){ return this._call('saveAccounts',{list}); },
+  async changePassword(user,currentPw,newPw){ return this._call('changePassword',{user,currentPw,newPw}); },
   async saveCfg(cfg){ return this._call('saveCfg',{cfg}); },
   async addLog(entry){ try{ return this._call('addLog',{entry}); }catch(e){} },
   async restore(data){ return this._call('restore',{data}); },
@@ -2010,22 +2034,28 @@ function keyIcon(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentC
 
 /* đổi mật khẩu */
 function askChangePw(force){
-  openModal(`<div class="modal-head"><div><h3>Đổi mật khẩu</h3><p>${force?'Đặt mật khẩu mới cho lần đầu đăng nhập.':'Cập nhật mật khẩu của bạn.'}</p></div>
+  const eye='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+  openModal(`<div class="modal-head grad"><div><h3>Đổi mật khẩu</h3>${force?'<p>Vui lòng đặt mật khẩu mới cho lần đầu đăng nhập.</p>':''}</div>
     ${force?'':`<button class="ic" onclick="closeModal()">${xIcon()}</button>`}</div>
-    <div class="modal-body"><div class="fg"><label>Mật khẩu mới</label>
-      <div class="input-wrap"><input id="cp-new" type="password" placeholder="Số, chữ cái, ký tự đặc biệt — tùy ý">
-      <button class="eye" onclick="togglePw('cp-new',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-      <div style="font-size:11.5px;color:var(--muted);margin-top:6px">Chấp nhận số, chữ cái và ký tự đặc biệt; không giới hạn độ dài.</div></div></div>
-    <div class="modal-foot">${force?'':'<button class="btn" onclick="closeModal()">Để sau</button>'}
-      <button class="btn pri" onclick="saveNewPw()">${saveIcon()} Lưu</button></div>`);
+    <div class="modal-body">
+      <div class="fg"><label>Mật khẩu hiện tại</label><div class="pw"><input id="cp-cur" type="password" placeholder="Mật khẩu đang dùng"><button class="eye" onclick="togglePw('cp-cur',this)">${eye}</button></div></div>
+      <div class="fg" style="margin-top:14px"><label>Mật khẩu mới</label><div class="pw"><input id="cp-new" type="password" placeholder="Số, chữ cái, ký tự đặc biệt — tùy ý"><button class="eye" onclick="togglePw('cp-new',this)">${eye}</button></div></div>
+      <div class="fg" style="margin-top:14px"><label>Nhập lại mật khẩu mới</label><div class="pw"><input id="cp-confirm" type="password" placeholder="Gõ lại mật khẩu mới" onkeydown="if(event.key==='Enter')saveNewPw()"><button class="eye" onclick="togglePw('cp-confirm',this)">${eye}</button></div></div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:10px">Chấp nhận số, chữ cái và ký tự đặc biệt; không giới hạn độ dài.</div></div>
+    <div class="modal-foot">${force?'':'<button class="btn" onclick="closeModal()">Hủy</button>'}
+      <button class="btn pri" onclick="saveNewPw()">Đổi mật khẩu</button></div>`, 'pw');
 }
-async function saveNewPw(){ const p=$('#cp-new').value; if(!p){ toast('Vui lòng nhập mật khẩu mới','err'); return; }
-  const list=DB.accounts.map(x=>Object.assign({},x)); const a=list.find(x=>x.user===session.user);
-  if(a){ a.pass=hashPw(p); a.must_change=false; }
-  try{ await Store.saveAccounts(list); session.must_change=false;
+async function saveNewPw(){
+  const cur=$('#cp-cur')?$('#cp-cur').value:'', p=$('#cp-new').value, c=$('#cp-confirm')?$('#cp-confirm').value:'';
+  if(!p){ toast('Vui lòng nhập mật khẩu mới','err'); return; }
+  if(p!==c){ toast('Nhập lại mật khẩu mới chưa khớp','err'); const el=$('#cp-confirm'); if(el)el.focus(); return; }
+  try{ await Store.changePassword(session.user, cur, p);
+    session.must_change=false;
     sessionStorage.setItem('sealgps_user',JSON.stringify(session));
     try{ if(localStorage.getItem('sealgps_user')) localStorage.setItem('sealgps_user',JSON.stringify(session)); }catch(e){}
-    closeModal(); await reload(false); toast('Đã đổi mật khẩu','ok'); }catch(e){ toast(e.message,'err'); } }
+    logAction('Đổi mật khẩu', session.user);
+    closeModal(); await reload(false); toast('Đã đổi mật khẩu','ok');
+  }catch(e){ toast(e.message,'err'); if(/hiện tại/.test(e.message)){ const el=$('#cp-cur'); if(el)el.focus(); } } }
 
 /* ============================================================
    HƯỚNG DẪN (theo vai trò)
