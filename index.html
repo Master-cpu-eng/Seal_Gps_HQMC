@@ -707,7 +707,10 @@ const nf = new Intl.NumberFormat('vi-VN');
 const fmtNum = n => nf.format(Number(n)||0);
 function thousandInput(el){ if(!el)return; el.addEventListener('input',()=>{ let v=el.value.replace(/\D/g,''); el.value=v?fmtNum(v):''; }); }
 function unThousand(v){ return Number(String(v).replace(/\D/g,''))||0; }
-function togglePw(id,btn){ const i=$('#'+id); i.type=i.type==='password'?'text':'password'; btn.style.color=i.type==='text'?'var(--brand)':''; }
+const EYE_ON_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+function togglePw(id,btn){ const i=$('#'+id); if(!i) return; const show=i.type==='password'; i.type=show?'text':'password';
+  if(btn){ btn.innerHTML = show ? EYE_OFF_SVG : EYE_ON_SVG; btn.style.color = show ? 'var(--brand-2)' : ''; } }
 
 function toast(msg,type='ok'){
   const icons={ok:'M20 6L9 17l-5-5',err:'M18 6L6 18M6 6l12 12',info:'M12 16v-4M12 8h.01',
@@ -2049,13 +2052,23 @@ async function saveNewPw(){
   const cur=$('#cp-cur')?$('#cp-cur').value:'', p=$('#cp-new').value, c=$('#cp-confirm')?$('#cp-confirm').value:'';
   if(!p){ toast('Vui lòng nhập mật khẩu mới','err'); return; }
   if(p!==c){ toast('Nhập lại mật khẩu mới chưa khớp','err'); const el=$('#cp-confirm'); if(el)el.focus(); return; }
-  try{ await Store.changePassword(session.user, cur, p);
+  try{
+    try{
+      await Store.changePassword(session.user, cur, p);
+    }catch(e){
+      if(/hiện tại/i.test(e.message||'')){ throw e; } // mật khẩu hiện tại sai -> báo lỗi luôn
+      // Máy chủ chưa hỗ trợ 'changePassword' (bản cũ) -> phương án dự phòng tương thích
+      await Store.login(session.user, cur).catch(()=>{ throw new Error('Mật khẩu hiện tại không đúng.'); });
+      const list=DB.accounts.map(x=>Object.assign({},x)); const a=list.find(x=>x.user===session.user);
+      if(a) a.pass=p; // gửi dạng chữ để máy chủ bản cũ (so khớp chữ) vẫn đăng nhập được; máy chủ bản mới sẽ tự băm
+      await Store.saveAccounts(list);
+    }
     session.must_change=false;
     sessionStorage.setItem('sealgps_user',JSON.stringify(session));
     try{ if(localStorage.getItem('sealgps_user')) localStorage.setItem('sealgps_user',JSON.stringify(session)); }catch(e){}
     logAction('Đổi mật khẩu', session.user);
     closeModal(); await reload(false); toast('Đã đổi mật khẩu','ok');
-  }catch(e){ toast(e.message,'err'); if(/hiện tại/.test(e.message)){ const el=$('#cp-cur'); if(el)el.focus(); } } }
+  }catch(e){ toast(e.message,'err'); if(/hiện tại/i.test(e.message||'')){ const el=$('#cp-cur'); if(el)el.focus(); } } }
 
 /* ============================================================
    HƯỚNG DẪN (theo vai trò)
